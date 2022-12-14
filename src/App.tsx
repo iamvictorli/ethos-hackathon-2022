@@ -1,7 +1,9 @@
 import { createMachine, assign } from "xstate";
 import { useMachine } from "@xstate/react";
 import { inspect } from "@xstate/inspect";
+import { ActionGroup, Item } from "@adobe/react-spectrum";
 import "./App.css";
+import React from "react";
 
 inspect({
   url: "https://statecharts.io/inspect",
@@ -18,7 +20,7 @@ const FIRST_QUESTIONS = {
 const questionMachine = createMachine(
   {
     id: "question",
-    initial: "start",
+    initial: "email",
     context: {
       firstQuestions: FIRST_QUESTIONS.PROTECTIONS_FIRST,
     },
@@ -51,18 +53,22 @@ const questionMachine = createMachine(
             {
               target: "protections",
               cond: "howItWorksFirst",
+              actions: ["saveHowItWorks"],
             },
             {
               target: "intent",
               cond: "protectionsFirst",
+              actions: ["saveHowItWorks"],
             },
             {
               target: "intent",
               cond: "goalsFirst",
+              actions: ["saveHowItWorks"],
             },
             {
               target: "goals",
               cond: "intentFirst",
+              actions: ["saveHowItWorks"],
             },
           ],
           prev: "start",
@@ -74,24 +80,42 @@ const questionMachine = createMachine(
             {
               target: "howItWorks",
               cond: "protectionsFirst",
+              actions: ["saveGoals"],
             },
             {
               target: "protections",
               cond: "goalsFirst",
+              actions: ["saveGoals"],
             },
             {
               target: "protections",
               cond: "intentFirst",
+              actions: ["saveGoals"],
             },
           ],
+          prev: {
+            target: "howItWorks",
+          },
         },
       },
       protections: {
         on: {
           next: [
-            { target: "intent", cond: "howItWorksFirst" },
-            { target: "goals", cond: "protectionsFirst" },
-            { target: "howItWorks", cond: "goalsFirst" },
+            {
+              target: "intent",
+              cond: "howItWorksFirst",
+              actions: ["saveProtections"],
+            },
+            {
+              target: "goals",
+              cond: "protectionsFirst",
+              actions: ["saveProtections"],
+            },
+            {
+              target: "howItWorks",
+              cond: "goalsFirst",
+              actions: ["saveProtections"],
+            },
           ],
           prev: "howItWorks",
         },
@@ -187,15 +211,122 @@ const questionMachine = createMachine(
         return context.firstQuestions === FIRST_QUESTIONS.INTENT_FIRST;
       },
       skipBirthState: (context, event) => {
-        return event.country !== "USA";
+        return event.birthCountry !== "United States";
       },
+    },
+    actions: {
+      saveProtections: assign((context, event) => {
+        return {
+          protections: event.protections,
+        };
+      }),
+      saveGoals: assign((context, event) => {
+        return {
+          goals: event.goals,
+        };
+      }),
+      saveHowItWorks: assign((context, event) => {
+        return {
+          howItWorks: true,
+        };
+      }),
     },
   }
 );
 
+function Question({ name, send, context }) {
+  let [protectionsSelected, protectionsSetSelected] = React.useState(
+    new Set([])
+  );
+  let [goalsSelected, goalsSetSelected] = React.useState(new Set([]));
+  let [birthCountry, setBirthCountry] = React.useState();
+
+  if (name === "protections") {
+    return (
+      <>
+        <h1>Question: {name}</h1>
+        <ActionGroup
+          selectionMode="multiple"
+          selectedKeys={protectionsSelected}
+          onSelectionChange={protectionsSetSelected}
+        >
+          <Item key="spouse">Spouse</Item>
+          <Item key="children">Children</Item>
+          <Item key="fiance">Fiance</Item>
+          <Item key="partner">Partner</Item>
+        </ActionGroup>
+        {context.firstQuestions === FIRST_QUESTIONS.PROTECTIONS_FIRST ? null : (
+          <button onClick={() => send("prev")}>Prev</button>
+        )}
+        <button
+          onClick={() =>
+            send({ type: "next", protections: Array.from(protectionsSelected) })
+          }
+        >
+          Next
+        </button>
+      </>
+    );
+  } else if (name === "goals") {
+    return (
+      <>
+        <h1>Question: {name}</h1>
+        <ActionGroup
+          selectionMode="multiple"
+          selectedKeys={goalsSelected}
+          onSelectionChange={goalsSetSelected}
+        >
+          <Item key="retirement">Retirement</Item>
+          <Item key="mortgage">Mortgage</Item>
+          <Item key="unsure">Unsure</Item>
+        </ActionGroup>
+        {context.firstQuestions === FIRST_QUESTIONS.GOALS_FIRST ? null : (
+          <button onClick={() => send("prev")}>Prev</button>
+        )}
+        <button
+          onClick={() =>
+            send({ type: "next", goals: Array.from(goalsSelected) })
+          }
+        >
+          Next
+        </button>
+      </>
+    );
+  } else if (name === "birthCountry") {
+    return (
+      <>
+        <h1>Question: {name}</h1>
+        <ActionGroup selectionMode="single" onAction={setBirthCountry}>
+          <Item key="United States">United States</Item>
+          <Item key="Other">Other</Item>
+        </ActionGroup>
+        <button onClick={() => send("prev")}>Prev</button>
+        <button onClick={() => send({ type: "next", birthCountry })}>
+          Next
+        </button>
+      </>
+    );
+  }
+
+  // skip questions
+
+  return (
+    <>
+      <h1>New Question: {name}</h1>
+      <button onClick={() => send("prev")}>Prev</button>
+      <button onClick={() => send("next")}>Next</button>
+    </>
+  );
+}
+
 export default function App() {
   const [state, send] = useMachine(questionMachine, { devTools: true });
   console.log({ state });
+
+  if (state.value === "start") {
+    send("next");
+    return null;
+  }
 
   if (state.done) {
     return <h1>Final Question: {state.value}</h1>;
@@ -203,11 +334,7 @@ export default function App() {
 
   return (
     <div className="App">
-      <h1>Question: {state.value}</h1>
-      {state.value !== "start" ? (
-        <button onClick={() => send("prev")}>Prev</button>
-      ) : null}
-      <button onClick={() => send("next")}>Next</button>
+      <Question name={state.value} send={send} context={state.context} />
     </div>
   );
 }
