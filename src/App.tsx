@@ -5,10 +5,10 @@ import { ActionGroup, Item, TextField } from "@adobe/react-spectrum";
 import "./App.css";
 import React from "react";
 
-inspect({
-  url: "https://statecharts.io/inspect",
-  iframe: false,
-});
+// inspect({
+//   url: "https://statecharts.io/inspect",
+//   iframe: false,
+// });
 
 const FIRST_QUESTIONS = {
   HOW_IT_WORKS_FIRST: "HOW_IT_WORKS_FIRST",
@@ -20,7 +20,7 @@ const FIRST_QUESTIONS = {
 const questionMachine = createMachine(
   {
     id: "question",
-    initial: "start",
+    initial: "email",
     predictableActionArguments: true,
     context: {
       firstQuestions: FIRST_QUESTIONS.PROTECTIONS_FIRST,
@@ -440,7 +440,7 @@ function Question({ name, send, context }) {
 }
 
 export default function App() {
-  const [state, send] = useMachine(questionMachine, { devTools: true });
+  const [state, send] = useMachine(questionMachine, { devTools: false });
   console.log({ state });
 
   if (state.value === "start") {
