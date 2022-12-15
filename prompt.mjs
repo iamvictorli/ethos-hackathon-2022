@@ -1,14 +1,7 @@
-import { createMachine, assign } from "xstate";
-import { useMachine } from "@xstate/react";
-import { inspect } from "@xstate/inspect";
-import { ActionGroup, Item, TextField } from "@adobe/react-spectrum";
-import "./App.css";
-import React from "react";
-
-inspect({
-  url: "https://statecharts.io/inspect",
-  iframe: false,
-});
+import prompts from "prompts";
+import { createMachine, assign, interpret } from "xstate";
+import fetch from "node-fetch";
+import cookie from "cookie";
 
 const FIRST_QUESTIONS = {
   HOW_IT_WORKS_FIRST: "HOW_IT_WORKS_FIRST",
@@ -20,7 +13,7 @@ const FIRST_QUESTIONS = {
 const questionMachine = createMachine(
   {
     id: "question",
-    initial: "start",
+    initial: "email",
     predictableActionArguments: true,
     context: {
       firstQuestions: FIRST_QUESTIONS.PROTECTIONS_FIRST,
@@ -296,10 +289,16 @@ const questionMachine = createMachine(
         })
           .then(async (res) => {
             const json = await res.json();
+            const cookieHeader = res.headers.get("set-cookie");
+            const cookieParsed = cookie.parse(cookieHeader);
 
-            return { xcsrftoken: res.headers.get("X-CSRF-TOKEN"), json };
+            return {
+              xcsrftoken: res.headers.get("X-CSRF-TOKEN"),
+              json,
+              jwt: cookieParsed.ETHOS,
+            };
           })
-          .then(async ({ json, xcsrftoken }) => {
+          .then(async ({ json, xcsrftoken, jwt }) => {
             const policyJson = await fetch(
               `http://localhost:8000/v2.0/user/${json.user.id}/identity/${json.identity.id}/term-policy`,
               {
@@ -307,6 +306,7 @@ const questionMachine = createMachine(
                   accept: "application/json",
                   "content-type": "application/json",
                   "X-XSRF-TOKEN": xcsrftoken,
+                  cookie: `XSRF-TOKEN=${xcsrftoken}; ETHOS=${jwt}`,
                 },
                 body: '{"optionalData":{"profileData":{"statusCitizen":true,"statusPermanentResident":false,"prescreen":{"declaredTobacco":false,"declaredHealth":"3"},"occupationalHistory":{"grossAnnualIncome":"0"}},"quoteData":{}},"paymentPlan":"monthly","clientData":{"activeInUi":true,"attributionData":{},"intent":"veryLow","intentAnswer":"I\'m not sure","flow":"nap-recommendation","partnerCode":"","createdByPartner":false,"telesales":0,"progress":"preinterview","partnershipAttributes":{},"children":"0","mortgageDebtAmounts":"0","iulCandidate":false},"carrier":"LGA","purposeOfInsurance":"personal","applicationSource":null}',
                 method: "PUT",
@@ -329,137 +329,93 @@ const questionMachine = createMachine(
   }
 );
 
-function Question({ name, send, context }) {
-  let [protectionsSelected, protectionsSetSelected] = React.useState(
-    new Set([])
-  );
-  let [goalsSelected, goalsSetSelected] = React.useState(new Set([]));
-  let [birthCountry, setBirthCountry] = React.useState();
-  let [email, setEmail] = React.useState("");
+(async () => {
+  const service = interpret(questionMachine).onTransition(async (state) => {
+    console.log({ question: state.value, context: state.context });
+    if (state.value === "start") {
+      service.send({ type: "next" });
+      return;
+    }
 
-  if (name === "protections") {
-    return (
-      <>
-        <h1>Question: {name}</h1>
-        <ActionGroup
-          selectionMode="multiple"
-          selectedKeys={protectionsSelected}
-          onSelectionChange={protectionsSetSelected}
-        >
-          <Item key="spouse">Spouse</Item>
-          <Item key="children">Children</Item>
-          <Item key="fiance">Fiance</Item>
-          <Item key="partner">Partner</Item>
-        </ActionGroup>
-        {context.firstQuestions === FIRST_QUESTIONS.PROTECTIONS_FIRST ? null : (
-          <button onClick={() => send("prev")}>Prev</button>
-        )}
-        <button
-          onClick={() =>
-            send({ type: "next", protections: Array.from(protectionsSelected) })
-          }
-        >
-          Next
-        </button>
-      </>
-    );
-  } else if (name === "goals") {
-    return (
-      <>
-        <h1>Question: {name}</h1>
-        <ActionGroup
-          selectionMode="multiple"
-          selectedKeys={goalsSelected}
-          onSelectionChange={goalsSetSelected}
-        >
-          <Item key="retirement">Retirement</Item>
-          <Item key="mortgage">Mortgage</Item>
-          <Item key="unsure">Unsure</Item>
-        </ActionGroup>
-        {context.firstQuestions === FIRST_QUESTIONS.GOALS_FIRST ? null : (
-          <button onClick={() => send("prev")}>Prev</button>
-        )}
-        <button
-          onClick={() =>
-            send({ type: "next", goals: Array.from(goalsSelected) })
-          }
-        >
-          Next
-        </button>
-      </>
-    );
-  } else if (name === "birthCountry") {
-    return (
-      <>
-        <h1>Question: {name}</h1>
-        <ActionGroup selectionMode="single" onAction={setBirthCountry}>
-          <Item key="United States">United States</Item>
-          <Item key="Other">Other</Item>
-        </ActionGroup>
-        <button onClick={() => send("prev")}>Prev</button>
-        <button onClick={() => send({ type: "next", birthCountry })}>
-          Next
-        </button>
-      </>
-    );
-  } else if (name === "email" || name === "accountCreate") {
-    return (
-      <>
-        <h1>Question: {name}</h1>
-        <div>
-          <TextField
-            label="email"
-            value={email}
-            onChange={setEmail}
-            isDisabled={name === "accountCreate"}
-          />
-        </div>
-        <button
-          onClick={() => send("prev")}
-          disabled={name === "accountCreate"}
-        >
-          Prev
-        </button>
-        <button
-          onClick={() => send({ type: "next", email })}
-          disabled={name === "accountCreate"}
-        >
-          Next
-        </button>
-      </>
-    );
-  }
+    if (state.done) {
+      // TODO, get SSO for policy
+      console.log(`finished on ${state.value}`);
 
-  return (
-    <>
-      <h1>New Question: {name}</h1>
-      <button onClick={() => send("prev")}>Prev</button>
-      <button onClick={() => send("next")}>Next</button>
-    </>
-  );
-}
+      return;
+    }
 
-export default function App() {
-  const [state, send] = useMachine(questionMachine, { devTools: true });
-  console.log({ state });
+    if (state.value === "accountCreate") {
+      console.log("Creating your account...");
+      return;
+    }
 
-  if (state.value === "start") {
-    send("next");
-    return null;
-  }
+    if (state.value === "protections") {
+      const { protections } = await prompts({
+        type: "multiselect",
+        name: "protections",
+        message: "Question: Protections",
+        choices: [
+          { title: "Spouse", value: "spouse" },
+          { title: "Children", value: "children" },
+          { title: "Fiance", value: "fiance" },
+          { title: "Partner", value: "partner" },
+        ],
+      });
 
-  if (state.done) {
-    return (
-      <>
-        <h1>Final Question: {state.value}</h1>
-        <h2>{JSON.stringify({ policy: state.context.policy }, null, 2)}</h2>
-      </>
-    );
-  }
+      service.send({ type: "next", protections });
+      return;
+    }
 
-  return (
-    <div className="App">
-      <Question name={state.value} send={send} context={state.context} />
-    </div>
-  );
-}
+    if (state.value === "goals") {
+      const { goals } = await prompts({
+        type: "multiselect",
+        name: "goals",
+        message: "Question: Goals",
+        choices: [
+          { title: "Retirement", value: "retirement" },
+          { title: "Mortgage", value: "mortgage" },
+          { title: "Unsure", value: "unsure" },
+        ],
+      });
+
+      service.send({ type: "next", goals });
+      return;
+    }
+
+    if (state.value === "email") {
+      const { email } = await prompts({
+        type: "text",
+        name: "email",
+        message: "What is your email?",
+      });
+
+      service.send({ type: "next", email });
+      return;
+    }
+
+    if (state.value === "birthCountry") {
+      const { birthCountry } = await prompts({
+        type: "select",
+        name: "birthCountry",
+        message: "Question: birthCountry",
+        choices: [
+          { title: "United States", value: "United States" },
+          { title: "Other", value: "Other" },
+        ],
+      });
+
+      service.send({ type: "next", birthCountry });
+      return;
+    }
+
+    await prompts({
+      type: "confirm",
+      name: state.value,
+      message: `Question: ${state.value}`,
+    });
+    service.send({ type: "next" });
+    return;
+  });
+
+  service.start();
+})();
